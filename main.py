@@ -20,10 +20,8 @@
 
 """
 # Imports
-import sys
 import torch
 import os
-import matplotlib.pyplot as plt
 import warnings
 from src.system_model import SystemModelParams
 from src.signal_creation import *
@@ -31,60 +29,44 @@ from src.data_handler import *
 from src.criterions import set_criterions
 from src.training import *
 from src.evaluation import evaluate
-from src.plotting import initialize_figures
 from pathlib import Path
 from src.models import ModelGenerator
 
 # Initialization
 warnings.simplefilter("ignore")
 os.system("cls||clear")
-plt.close("all")
 
 if __name__ == "__main__":
     # Initialize paths
     external_data_path = Path.cwd() / "data"
-    scenario_data_path = "uniform_bias_spacing"
+    scenario_data_path = "diff_esprit"
     datasets_path = external_data_path / "datasets" / scenario_data_path
-    simulations_path = external_data_path / "simulations"
     saving_path = external_data_path / "weights"
-    # create folders if not exists
-    datasets_path.mkdir(parents=True, exist_ok=True)
-    (datasets_path / "train").mkdir(parents=True, exist_ok=True)
-    (datasets_path / "test").mkdir(parents=True, exist_ok=True)
-    datasets_path.mkdir(parents=True, exist_ok=True)
-    simulations_path.mkdir(parents=True, exist_ok=True)
-    saving_path.mkdir(parents=True, exist_ok=True)
+    final_models_path = saving_path / "final_models"
     # Initialize time and date
     now = datetime.now()
     dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
-    dt_string_for_save = now.strftime("%d_%m_%Y_%H_%M")
     # Operations commands
     commands = {
-        "SAVE_TO_FILE": True,  # Saving results to file or present them over CMD
+        "SAVE_TO_FILE": False,  # Saving results to file or present them over CMD
         "CREATE_DATA": False,  # Creating new dataset
         "LOAD_DATA": True,  # Loading data from exist dataset
         "LOAD_MODEL": True,  # Load specific model for training
-        "TRAIN_MODEL": True,  # Applying training operation
+        "TRAIN_MODEL": False,  # Applying training operation
         "SAVE_MODEL": False,  # Saving tuned model
         "EVALUATE_MODE": True,  # Evaluating desired algorithms
     }
-    # Saving simulation scores to external file
-    if commands["SAVE_TO_FILE"]:
-        file_path = (
-            simulations_path / "results" / "scores" / Path(dt_string_for_save + ".txt")
-        )
-        sys.stdout = open(file_path, "w")
     # Define system model parameters
     system_model_params = (
         SystemModelParams()
         .set_parameter("N", 8)
-        .set_parameter("M", 3)
-        .set_parameter("T", 200)
+        .set_parameter("M", 5)
+        .set_parameter("T", 100)
         .set_parameter("snr", 10)
         .set_parameter("signal_type", "NarrowBand")
-        .set_parameter("signal_nature", "non-coherent")
+        .set_parameter("signal_nature", "coherent")
         .set_parameter("eta", 0)
-        .set_parameter("bias", 0.05)
+        .set_parameter("bias", 0)
         .set_parameter("sv_noise_var", 0)
     )
     # Generate model configuration
@@ -96,11 +78,25 @@ if __name__ == "__main__":
         .set_model(system_model_params)
     )
     # Define samples size
-    samples_size = 100000  # Overall dateset size
-    train_test_ratio = 0.05  # training and testing datasets ratio
+    samples_size = 100  # Bundled baseline dataset size
+    train_test_ratio = 1.0
     # Sets simulation filename
     simulation_filename = get_simulation_filename(
         system_model_params=system_model_params, model_config=model_config
+    )
+    legacy_dataset_suffix = (
+        "NarrowBand_coherent_100_M=5_N=8_T=100_SNR=10_eta=0_sv_noise_var0_.h5"
+    )
+    model_dataset_path = (
+        datasets_path / "test" / f"SubspaceNet_DataSet_{legacy_dataset_suffix}"
+    )
+    generic_dataset_path = (
+        datasets_path / "test" / f"Generic_DataSet_{legacy_dataset_suffix}"
+    )
+    samples_model_path = datasets_path / "test" / f"samples_model_{legacy_dataset_suffix}"
+    model_path = (
+        final_models_path
+        / "SubspaceNet_M=5_T=100_SNR_10_tau=8_NarrowBand_diff_method=esprit_coherent_eta=0_sv_noise=0"
     )
     # Print new simulation intro
     print("------------------------------------")
@@ -141,19 +137,9 @@ if __name__ == "__main__":
             )
     # Datasets loading
     elif commands["LOAD_DATA"]:
-        (
-            train_dataset,
-            test_dataset,
-            generic_test_dataset,
-            samples_model,
-        ) = load_datasets(
-            system_model_params=system_model_params,
-            model_type=model_config.model_type,
-            samples_size=samples_size,
-            datasets_path=datasets_path,
-            train_test_ratio=train_test_ratio,
-            is_training=True,
-        )
+        test_dataset = read_data(model_dataset_path)
+        generic_test_dataset = read_data(generic_dataset_path)
+        samples_model = read_data(samples_model_path)
 
     # Training stage
     if commands["TRAIN_MODEL"]:
@@ -170,7 +156,7 @@ if __name__ == "__main__":
         )
         if commands["LOAD_MODEL"]:
             simulation_parameters.load_model(
-                loading_path=saving_path / "final_models" / simulation_filename
+                loading_path=model_path
             )
         # Print training simulation details
         simulation_summary(
@@ -191,21 +177,9 @@ if __name__ == "__main__":
                 model.state_dict(),
                 saving_path / "final_models" / Path(simulation_filename),
             )
-        # Plots saving
-        if commands["SAVE_TO_FILE"]:
-            plt.savefig(
-                simulations_path
-                / "results"
-                / "plots"
-                / Path(dt_string_for_save + r".png")
-            )
-        else:
-            plt.show()
 
     # Evaluation stage
     if commands["EVALUATE_MODE"]:
-        # Initialize figures dict for plotting
-        figures = initialize_figures()
         # Define loss measure for evaluation
         criterion, subspace_criterion = set_criterions("rmse")
         # Load datasets for evaluation
@@ -232,9 +206,7 @@ if __name__ == "__main__":
                 TrainingParams()
                 .set_model(model=model_config)
                 .load_model(
-                    loading_path=saving_path
-                    / "final_models"
-                    / simulation_filename
+                    loading_path=model_path
                 )
             )
             model = simulation_parameters.model
@@ -254,8 +226,7 @@ if __name__ == "__main__":
             criterion=criterion,
             subspace_criterion=subspace_criterion,
             system_model=samples_model,
-            figures=figures,
+            figures={},
             plot_spec=False,
         )
-    plt.show()
     print("end")

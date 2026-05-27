@@ -71,7 +71,12 @@ def create_dataset(
     """
     generic_dataset = []
     model_dataset = []
-    samples_model = Samples(system_model_params)
+    data_source = getattr(system_model_params, 'data_source', 'gaussian')
+    if data_source == 'radar':
+        from src.radar_samples import RadarSamples
+        samples_model = RadarSamples(system_model_params)
+    else:
+        samples_model = Samples(system_model_params)
     # Generate permutations for CNN model training dataset
     if model_type.startswith("DeepCNN") and phase.startswith("train"):
         doa_permutations = []

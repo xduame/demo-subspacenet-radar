@@ -6,7 +6,7 @@ plot_style.txt
 plotting
 Figures
 src/__pycache__
-data
+data/*
 
 # Python
 __pycache__/
@@ -25,6 +25,8 @@ data/simulations/*.pt
 data/simulations/*.h5
 
 # 但保留 simulations 里的 JSON 结果(小文件,作为研究记录)
+!data/simulations/
+data/simulations/*
 !data/simulations/*.json
 
 # 保留原始 Excel 数据

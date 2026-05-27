@@ -168,7 +168,7 @@ def read_data(path: str):
 
     """
     assert isinstance(path, (str, Path))
-    data = torch.load(path)
+    data = torch.load(path, weights_only=False)
     return data
 
 

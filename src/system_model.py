@@ -50,6 +50,12 @@ class SystemModelParams:
     eta = 0  # Sensor location deviation
     bias = 0  # Sensor bias deviation
     sv_noise_var = 0  # Steering vector added noise variance
+    # 雷达扩展参数
+    data_source = "gaussian"  # "gaussian" (原版) 或 "radar"
+    lib_path = "data/data_manual.xlsx"
+    fs_mhz = 200
+    rf_center_mhz = 9000
+    modes_pool = ["VS", "MRWS", "TASS", "TAST"]
 
     def set_parameter(self, name: str, value):
         """

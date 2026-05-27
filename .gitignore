@@ -1,0 +1,42 @@
+# git ignore files
+*.pdf
+Figures/*.pdf
+__pycache__/*.pyc
+plot_style.txt
+plotting
+Figures
+src/__pycache__
+data
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.Python
+venv/
+.venv/
+
+# 训练产物 - 不上传
+data/datasets/
+data/weights/
+data/simulations/*.png
+data/simulations/*.pt
+data/simulations/*.h5
+
+# 但保留 simulations 里的 JSON 结果(小文件,作为研究记录)
+!data/simulations/*.json
+
+# 保留原始 Excel 数据
+!data/data_manual.xlsx
+
+# 系统/IDE 杂物
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# 日志
+*.log
+nohup.out

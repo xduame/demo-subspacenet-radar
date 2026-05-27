@@ -1,7 +1,7 @@
-"""Minimal SubspaceNet DoA demo.
+"""Minimal Radar SubspaceNet DoA demo.
 
-Loads a trained SubspaceNet model, reads one array observation from the bundled
-test dataset, and prints the DoA estimate against ground truth.
+Loads the latest trained Radar SubspaceNet model by default, reads one radar
+array observation, and prints the DoA estimate against ground truth.
 """
 
 import argparse
@@ -19,14 +19,15 @@ DEFAULT_MODEL_PATH = (
     Path("data")
     / "weights"
     / "final_models"
-    / "SubspaceNet_M=5_T=100_SNR_10_tau=8_NarrowBand_diff_method=esprit_coherent_eta=0_sv_noise=0"
+    / "Radar_SubspaceNet_M=2_T=200_SNR_0_tau=8_NarrowBand_diff_method=esprit_non-coherent_eta=0_bias=0_sv_noise=0.pt"
 )
+RADAR_MODEL_GLOB = "Radar_SubspaceNet*.pt"
 DEFAULT_DATASET_PATH = (
     Path("data")
     / "datasets"
-    / "diff_esprit"
+    / "radar_baseline"
     / "test"
-    / "Generic_DataSet_NarrowBand_coherent_100_M=5_N=8_T=100_SNR=10_eta=0_sv_noise_var0_.h5"
+    / "Generic_DataSet_NarrowBand_non-coherent_500_M=2_N=16_T=200_SNR=0_eta=0_sv_noise_var0_bias=0_.h5"
 )
 
 
@@ -37,8 +38,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model-path",
         type=Path,
-        default=DEFAULT_MODEL_PATH,
-        help="Path to the trained SubspaceNet state_dict.",
+        default=None,
+        help="Path to the trained Radar SubspaceNet state_dict. Defaults to latest Radar_*.pt.",
     )
     parser.add_argument(
         "--dataset-path",
@@ -59,6 +60,20 @@ def parse_args() -> argparse.Namespace:
         help="Inference device.",
     )
     return parser.parse_args()
+
+
+def resolve_model_path(model_path: Path | None) -> Path:
+    if model_path is not None:
+        return model_path
+    models_dir = DEFAULT_MODEL_PATH.parent
+    radar_models = sorted(
+        models_dir.glob(RADAR_MODEL_GLOB),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if radar_models:
+        return radar_models[0]
+    return DEFAULT_MODEL_PATH
 
 
 def choose_device(device_name: str) -> torch.device:
@@ -101,11 +116,16 @@ def format_values(values: np.ndarray) -> str:
 def main() -> None:
     args = parse_args()
     device = choose_device(args.device)
+    model_path = resolve_model_path(args.model_path)
 
-    if not args.model_path.exists():
-        raise FileNotFoundError(f"Model file not found: {args.model_path}")
+    if not model_path.exists():
+        raise FileNotFoundError(
+            f"Radar model file not found: {model_path}. Run python main_radar.py first."
+        )
     if not args.dataset_path.exists():
-        raise FileNotFoundError(f"Dataset file not found: {args.dataset_path}")
+        raise FileNotFoundError(
+            f"Radar dataset file not found: {args.dataset_path}. Run python main_radar.py first."
+        )
 
     dataset = torch_load(args.dataset_path, torch.device("cpu"))
     if not 0 <= args.sample_index < len(dataset):
@@ -117,7 +137,7 @@ def main() -> None:
     if not torch.is_complex(X):
         raise ValueError("Expected the dataset sample X to be a complex array signal.")
 
-    state_dict = torch_load(args.model_path, device)
+    state_dict = torch_load(model_path, device)
     tau = infer_tau(state_dict)
     num_sources = int(truth_rad.numel())
 
@@ -136,9 +156,9 @@ def main() -> None:
     matched_pred, signed_error, rmse = best_periodic_match(pred_deg, truth_deg)
     abs_error = np.abs(signed_error)
 
-    print("SubspaceNet DoA Demo")
-    print("====================")
-    print(f"Model       : {args.model_path}")
+    print("Radar SubspaceNet DoA Demo")
+    print("==========================")
+    print(f"Model       : {model_path}")
     print(f"Dataset     : {args.dataset_path}")
     print(f"Sample index: {args.sample_index}")
     print(f"Signal X    : shape={tuple(X.shape)}, dtype={X.dtype}")

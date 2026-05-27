@@ -19,9 +19,9 @@ DEFAULT_MODEL_PATH = (
     Path("data")
     / "weights"
     / "final_models"
-    / "Radar_SubspaceNet_M=2_T=200_SNR_0_tau=8_NarrowBand_diff_method=esprit_non-coherent_eta=0_bias=0_sv_noise=0.pt"
+    / "Radar_SubspaceNet_M=2_T=200_SNR_0_tau=8_NarrowBand_diff_method=root_music_non-coherent_eta=0_bias=0_sv_noise=0.pt"
 )
-RADAR_MODEL_GLOB = "Radar_SubspaceNet*.pt"
+RADAR_MODEL_GLOB = "Radar_SubspaceNet*diff_method=root_music*.pt"
 DEFAULT_DATASET_PATH = (
     Path("data")
     / "datasets"
@@ -141,7 +141,7 @@ def main() -> None:
     tau = infer_tau(state_dict)
     num_sources = int(truth_rad.numel())
 
-    model = SubspaceNet(tau=tau, M=num_sources, diff_method="esprit").to(device)
+    model = SubspaceNet(tau=tau, M=num_sources, diff_method="root_music").to(device)
     model.load_state_dict(state_dict)
     model.eval()
 

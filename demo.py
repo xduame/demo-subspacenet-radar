@@ -28,7 +28,7 @@ MODEL_PATH = (
     Path("data")
     / "weights"
     / "final_models"
-    / "Radar_SubspaceNet_M=2_T=200_SNR_0_tau=8_NarrowBand_diff_method=esprit_non-coherent_eta=0_bias=0_sv_noise=0.pt"
+    / "Radar_SubspaceNet_M=2_T=200_SNR_0_tau=8_NarrowBand_diff_method=root_music_non-coherent_eta=0_bias=0_sv_noise=0.pt"
 )
 TEST_DATASET_PATH = (
     Path("data")
@@ -74,7 +74,7 @@ def build_system_model_params() -> SystemModelParams:
 def load_model(device: torch.device) -> SubspaceNet:
     if not MODEL_PATH.exists():
         raise FileNotFoundError(f"Missing model weights: {MODEL_PATH}")
-    model = SubspaceNet(tau=TAU, M=NUM_SOURCES, diff_method="esprit").to(device)
+    model = SubspaceNet(tau=TAU, M=NUM_SOURCES, diff_method="root_music").to(device)
     model.load_state_dict(torch_load(MODEL_PATH, device))
     model.eval()
     return model

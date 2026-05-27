@@ -26,7 +26,7 @@ BATCH_SIZE = 128
 LR = 1e-4
 WEIGHT_DECAY = 1e-9
 TAU = 8
-DIFF_METHOD = "esprit"
+DIFF_METHOD = "root_music"
 
 
 def build_system_model_params() -> SystemModelParams:

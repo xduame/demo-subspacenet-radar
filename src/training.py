@@ -31,7 +31,6 @@ None
 # Imports
 import torch
 import numpy as np
-import matplotlib.pyplot as plt
 import torch.nn as nn
 import time
 import copy
@@ -41,12 +40,31 @@ from datetime import datetime
 from torch.autograd import Variable
 from tqdm import tqdm
 from torch.optim import lr_scheduler
-from sklearn.model_selection import train_test_split
 from src.utils import *
 from src.criterions import *
 from src.system_model import SystemModel, SystemModelParams
 from src.models import SubspaceNet, DeepCNN, DeepAugmentedMUSIC, ModelGenerator
 from src.evaluation import evaluate_dnn_model
+
+try:
+    import matplotlib.pyplot as plt
+except ModuleNotFoundError:
+    plt = None
+
+try:
+    from sklearn.model_selection import train_test_split
+except ModuleNotFoundError:
+    def train_test_split(dataset, test_size=0.1, shuffle=True):
+        indices = np.arange(len(dataset))
+        if shuffle:
+            np.random.shuffle(indices)
+        split = int(len(dataset) * (1 - test_size))
+        train_indices = indices[:split]
+        valid_indices = indices[split:]
+        return (
+            [dataset[index] for index in train_indices],
+            [dataset[index] for index in valid_indices],
+        )
 
 
 class TrainingParams(object):
@@ -464,6 +482,8 @@ def plot_learning_curve(epoch_list, train_loss: list, validation_loss: list):
         train_loss (list): List of training losses per epoch.
         validation_loss (list): List of validation losses per epoch.
     """
+    if plt is None:
+        return
     plt.title("Learning Curve: Loss per Epoch")
     plt.plot(epoch_list, train_loss, label="Train")
     plt.plot(epoch_list, validation_loss, label="Validation")

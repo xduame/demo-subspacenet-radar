@@ -7,14 +7,12 @@ system/data configuration to use RadarSamples as the signal source.
 from pathlib import Path
 import warnings
 
-import matplotlib.pyplot as plt
 import torch
 
 from src.criterions import set_criterions
 from src.data_handler import create_dataset
 from src.evaluation import evaluate
 from src.models import ModelGenerator
-from src.plotting import initialize_figures
 from src.system_model import SystemModelParams
 from src.training import TrainingParams, get_simulation_filename, simulation_summary, train
 from src.utils import set_unified_seed
@@ -53,7 +51,6 @@ def build_system_model_params() -> SystemModelParams:
 
 def main() -> None:
     warnings.simplefilter("ignore")
-    plt.close("all")
     set_unified_seed()
 
     external_data_path = Path.cwd() / "data"
@@ -151,7 +148,7 @@ def main() -> None:
         criterion=criterion,
         subspace_criterion=subspace_criterion,
         system_model=samples_model,
-        figures=initialize_figures(),
+        figures={},
         plot_spec=False,
     )
     print(f"\nSaved best model: {final_models_path / simulation_filename}")

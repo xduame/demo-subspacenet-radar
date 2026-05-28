@@ -51,20 +51,7 @@ try:
 except ModuleNotFoundError:
     plt = None
 
-try:
-    from sklearn.model_selection import train_test_split
-except ModuleNotFoundError:
-    def train_test_split(dataset, test_size=0.1, shuffle=True):
-        indices = np.arange(len(dataset))
-        if shuffle:
-            np.random.shuffle(indices)
-        split = int(len(dataset) * (1 - test_size))
-        train_indices = indices[:split]
-        valid_indices = indices[split:]
-        return (
-            [dataset[index] for index in train_indices],
-            [dataset[index] for index in valid_indices],
-        )
+from sklearn.model_selection import train_test_split
 
 
 class TrainingParams(object):

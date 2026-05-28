@@ -68,7 +68,7 @@ python -B main_radar.py
 训练完成后，权重保存在：
 
 ```text
-data/weights/final_models/Radar_SubspaceNet_M=2_T=200_SNR_0_tau=8_NarrowBand_diff_method=esprit_non-coherent_eta=0_bias=0_sv_noise=0.pt
+data/weights/final_models/Radar_SubspaceNet_M=2_T=200_SNR_0_tau=8_NarrowBand_diff_method=root_music_non-coherent_eta=0_bias=0_sv_noise=0.pt
 ```
 
 ### 3. 运行组会 Demo
@@ -138,14 +138,13 @@ python -B demo.py --mode all --angles "-20 35"
 | 配置 | N | M | T | SNR | Test RMSPE |
 |---|---:|---:|---:|---:|---:|
 | 原版 SubspaceNet + ESPRIT | 8 | 5 | 100 | 10 dB | 1.624 deg |
-| 雷达 SubspaceNet + ESPRIT | 16 | 2 | 200 | 0 dB | 1.403 deg |
-| 雷达 SubspaceNet + Root-MUSIC 增强 | 16 | 2 | 200 | 0 dB | 1.458 deg |
+| 雷达 SubspaceNet + Root-MUSIC | 16 | 2 | 200 | 0 dB | 1.331 deg |
 
 雷达基线训练输出：
 
 ```text
-Minimal Validation loss: 0.024531 rad
-SubspaceNet Test loss = 0.02448356477335886 rad = 1.403 deg
+Minimal Validation loss: 0.018637 rad
+SubspaceNet Test loss = 0.023223933001312407 rad = 1.331 deg
 ```
 
 Demo 单样本推理时间在 CPU 上约 1.5-6 ms，满足组会演示流畅度需求。

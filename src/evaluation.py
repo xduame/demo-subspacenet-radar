@@ -35,16 +35,8 @@ from src.criterions import RMSPE, MSPE
 from src.methods import MUSIC, RootMUSIC, Esprit, MVDR
 from src.utils import *
 from src.models import SubspaceNet
-
-try:
-    from matplotlib import pyplot as plt
-except ModuleNotFoundError:
-    plt = None
-
-try:
-    from src.plotting import plot_spectrum
-except ModuleNotFoundError:
-    plot_spectrum = None
+from matplotlib import pyplot as plt
+from src.plotting import plot_spectrum
 
 
 def evaluate_dnn_model(

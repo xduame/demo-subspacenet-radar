@@ -6,16 +6,9 @@ RadarSamples - 雷达信号源,扩展 SubspaceNet 的 Samples 类
 """
 
 import re
-import zipfile
-import xml.etree.ElementTree as ET
-from pathlib import Path
 
 import numpy as np
-
-try:
-    import pandas as pd
-except ModuleNotFoundError:
-    pd = None
+import pandas as pd
 
 from src.signal_creation import Samples
 from src.system_model import SystemModelParams
@@ -27,83 +20,9 @@ from src.system_model import SystemModelParams
 _LIB_CACHE = None
 
 
-def _is_na(value):
-    if pd is not None:
-        return pd.isna(value)
-    return value is None or value == ''
-
-
-def _row_value(row, index):
-    try:
-        return row[index]
-    except (IndexError, KeyError):
-        return None
-
-
-def _column_index(cell_ref):
-    letters = re.match(r'[A-Z]+', cell_ref).group(0)
-    index = 0
-    for letter in letters:
-        index = index * 26 + ord(letter) - ord('A') + 1
-    return index - 1
-
-
-def _load_shared_strings(xlsx_file, ns):
-    if 'xl/sharedStrings.xml' not in xlsx_file.namelist():
-        return []
-    root = ET.fromstring(xlsx_file.read('xl/sharedStrings.xml'))
-    return [
-        ''.join(text.text or '' for text in item.findall('.//m:t', ns))
-        for item in root.findall('m:si', ns)
-    ]
-
-
-def _worksheet_path(xlsx_file, sheet):
-    ns = {
-        'm': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main',
-        'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
-    }
-    workbook = ET.fromstring(xlsx_file.read('xl/workbook.xml'))
-    sheets = workbook.findall('m:sheets/m:sheet', ns)
-    target = next((s for s in sheets if s.attrib.get('name') == sheet), sheets[0])
-    rel_id = target.attrib['{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id']
-    rels = ET.fromstring(xlsx_file.read('xl/_rels/workbook.xml.rels'))
-    for rel in rels:
-        if rel.attrib['Id'] == rel_id:
-            return 'xl/' + rel.attrib['Target']
-    raise ValueError(f'Worksheet {sheet} not found in workbook relationships.')
-
-
-def _read_excel_rows_stdlib(xlsx_path, sheet):
-    ns = {'m': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
-    with zipfile.ZipFile(xlsx_path) as xlsx_file:
-        shared_strings = _load_shared_strings(xlsx_file, ns)
-        worksheet = ET.fromstring(xlsx_file.read(_worksheet_path(xlsx_file, sheet)))
-
-    rows = []
-    for row in worksheet.findall('.//m:sheetData/m:row', ns):
-        values = []
-        for cell in row.findall('m:c', ns):
-            cell_ref = cell.attrib.get('r', 'A1')
-            column = _column_index(cell_ref)
-            while len(values) <= column:
-                values.append(None)
-            value_node = cell.find('m:v', ns)
-            value = None if value_node is None else value_node.text
-            if cell.attrib.get('t') == 's' and value is not None:
-                value = shared_strings[int(value)]
-            elif cell.attrib.get('t') == 'inlineStr':
-                value = ''.join(
-                    text.text or '' for text in cell.findall('.//m:t', ns)
-                )
-            values[column] = value
-        rows.append(values)
-    return rows
-
-
 def _parse_range(s):
     """把 '5-10' 这种字符串解析成 (5.0, 10.0)"""
-    if _is_na(s) or not isinstance(s, str):
+    if pd.isna(s) or not isinstance(s, str):
         return None
     m = re.match(r'\s*([-\d.]+)\s*-\s*([-\d.]+)', s.strip())
     return (float(m.group(1)), float(m.group(2))) if m else None
@@ -115,31 +34,26 @@ def load_emitter_library(xlsx_path, sheet='空中平台追踪'):
     if _LIB_CACHE is not None:
         return _LIB_CACHE
 
-    if pd is not None:
-        df = pd.read_excel(xlsx_path, sheet_name=sheet, header=None)
-        rows = (row for _, row in df.iterrows())
-    else:
-        rows = _read_excel_rows_stdlib(xlsx_path, sheet)
-
+    df = pd.read_excel(xlsx_path, sheet_name=sheet, header=None)
     library, current_model = {}, None
     valid_modes = {'VS', 'HRWS', 'MRWS', 'TASS', 'TAST', 'STT'}
 
-    for row in rows:
-        c0 = _row_value(row, 0)
-        if _is_na(c0) or not isinstance(c0, str):
+    for _, row in df.iterrows():
+        c0 = row[0]
+        if pd.isna(c0) or not isinstance(c0, str):
             continue
         if re.match(r'^型号\d+$', c0):
             current_model = c0
             library[current_model] = {}
         elif c0 in valid_modes and current_model is not None:
             library[current_model][c0] = dict(
-                duration_s=_parse_range(_row_value(row, 1)),
-                pri_us=_parse_range(_row_value(row, 2)),
-                pri_mod=str(_row_value(row, 3)).strip() if not _is_na(_row_value(row, 3)) else '固定',
-                duty=_parse_range(_row_value(row, 4)),
-                rf_mhz=_parse_range(_row_value(row, 6)),
-                rf_mod=str(_row_value(row, 7)).strip() if not _is_na(_row_value(row, 7)) else '固定',
-                bw_mhz=_parse_range(_row_value(row, 9)),
+                duration_s=_parse_range(row[1]),
+                pri_us=_parse_range(row[2]),
+                pri_mod=str(row[3]).strip() if not pd.isna(row[3]) else '固定',
+                duty=_parse_range(row[4]),
+                rf_mhz=_parse_range(row[6]),
+                rf_mod=str(row[7]).strip() if not pd.isna(row[7]) else '固定',
+                bw_mhz=_parse_range(row[9]),
             )
     _LIB_CACHE = library
     return library

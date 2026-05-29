@@ -4,6 +4,7 @@ Modes:
   preset      Run three fixed DoA scenes.
   batch       Evaluate the saved 500-sample radar test set.
   interactive Estimate user-provided DoA angles.
+  file        Estimate DoA from a saved signal file.
 """
 
 import argparse
@@ -115,6 +116,47 @@ def make_radar_signal(doa_deg: list[float]) -> tuple[torch.Tensor, np.ndarray]:
     return X, np.asarray(doa_deg, dtype=float)
 
 
+def _to_signal_tensor(array: np.ndarray) -> torch.Tensor:
+    array = np.asarray(array)
+    if array.shape != (16, 200):
+        raise ValueError(f"Expected X shape (16, 200), got {array.shape}.")
+    if not np.iscomplexobj(array):
+        raise ValueError("Expected X to contain complex I/Q samples.")
+    return torch.tensor(array, dtype=torch.complex64)
+
+
+def _read_truth_deg(npz_data) -> np.ndarray | None:
+    if "doa_deg" in npz_data:
+        truth_deg = np.asarray(npz_data["doa_deg"], dtype=float)
+    elif "truth_deg" in npz_data:
+        truth_deg = np.asarray(npz_data["truth_deg"], dtype=float)
+    elif "doa_rad" in npz_data:
+        truth_deg = np.rad2deg(np.asarray(npz_data["doa_rad"], dtype=float))
+    else:
+        return None
+    if truth_deg.shape != (NUM_SOURCES,):
+        raise ValueError(f"Expected truth DoA shape ({NUM_SOURCES},), got {truth_deg.shape}.")
+    return truth_deg
+
+
+def load_signal_file(input_path: Path) -> tuple[torch.Tensor, np.ndarray | None]:
+    if not input_path.exists():
+        raise FileNotFoundError(f"Missing signal file: {input_path}")
+
+    suffix = input_path.suffix.lower()
+    if suffix == ".npz":
+        with np.load(input_path) as data:
+            if "X" not in data:
+                raise ValueError("NPZ signal file must contain an 'X' array.")
+            X = _to_signal_tensor(data["X"])
+            truth_deg = _read_truth_deg(data)
+        return X, truth_deg
+    if suffix == ".npy":
+        return _to_signal_tensor(np.load(input_path)), None
+
+    raise ValueError("Unsupported signal file type. Use .npz or .npy.")
+
+
 def predict_from_signal(model: SubspaceNet, X: torch.Tensor, device: torch.device):
     data_handler.device = device
     model_input = create_autocorrelation_tensor(X, TAU)
@@ -135,6 +177,12 @@ def print_case(title: str, pred_deg: np.ndarray, truth_deg: np.ndarray, elapsed_
     print(f"Prediction  : {format_values(matched_pred)} deg")
     print(f"Abs. error  : {format_values(abs_error)} deg")
     print(f"RMSPE/RMSE  : {rmse:.3f} deg")
+    print(f"Inference   : {elapsed_ms:.2f} ms")
+
+
+def print_prediction(title: str, pred_deg: np.ndarray, elapsed_ms: float) -> None:
+    print(f"\n{title}")
+    print(f"Prediction  : {format_values(np.sort(pred_deg))} deg")
     print(f"Inference   : {elapsed_ms:.2f} ms")
 
 
@@ -171,6 +219,17 @@ def run_batch(model: SubspaceNet, device: torch.device, limit: int = 500) -> Non
     mean_inference_ms = float(np.mean(inference_times))
     print(f"Test RMSPE : {mean_rmspe_deg:.3f} deg")
     print(f"Mean infer : {mean_inference_ms:.2f} ms/sample")
+
+
+def run_file(model: SubspaceNet, device: torch.device, input_path: Path | None) -> None:
+    if input_path is None:
+        raise SystemExit("--input-path is required for --mode file.")
+    X, truth_deg = load_signal_file(input_path)
+    pred_deg, elapsed_ms = predict_from_signal(model, X, device)
+    if truth_deg is None:
+        print_prediction("File scene", pred_deg, elapsed_ms)
+    else:
+        print_case("File scene", pred_deg, truth_deg, elapsed_ms)
 
 
 def parse_angles(raw_values: str | list[str]) -> list[float]:
@@ -213,7 +272,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Radar SubspaceNet DoA demo.")
     parser.add_argument(
         "--mode",
-        choices=("preset", "batch", "interactive", "all"),
+        choices=("preset", "batch", "interactive", "file", "all"),
         default="preset",
         help="Demo mode to run.",
     )
@@ -226,6 +285,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--angles",
         help='Two angles for interactive mode, e.g. --angles "-20 35".',
+    )
+    parser.add_argument(
+        "--input-path",
+        type=Path,
+        help="Signal file for file mode. Supports .npz with X/doa_deg or .npy with X.",
     )
     parser.add_argument(
         "--device",
@@ -257,6 +321,8 @@ def main() -> None:
         run_batch(model, device, limit=args.batch_limit)
     if args.mode == "interactive":
         run_interactive(model, device, angle_args=args.angles)
+    if args.mode == "file":
+        run_file(model, device, input_path=args.input_path)
     elif args.mode == "all" and args.angles:
         run_interactive(model, device, angle_args=args.angles)
 

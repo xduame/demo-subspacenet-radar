@@ -108,6 +108,71 @@ def beamform_sources(
     ]
 
 
+def detect_toa_pw(sig, fs_mhz):
+    """
+    双门限法检测脉冲的 TOA 和 PW。
+
+    Args:
+        sig: [T] 复数信号(波束形成后的单源信号)
+        fs_mhz: 采样率(MHz)
+
+    Returns:
+        toa_us: 到达时间(微秒)
+        pw_us: 脉宽(微秒)
+    """
+    if fs_mhz <= 0:
+        raise ValueError("fs_mhz must be positive.")
+    if hasattr(sig, "detach"):
+        sig = sig.detach().cpu().numpy()
+
+    sig = np.asarray(sig)
+    if sig.ndim != 1:
+        raise ValueError(f"Expected sig with shape (T,), got {sig.shape}.")
+    if sig.size == 0:
+        return float("nan"), float("nan")
+
+    env = np.abs(sig).astype(float)
+    env[~np.isfinite(env)] = 0.0
+    peak = float(env.max())
+    if peak <= 0:
+        return float("nan"), float("nan")
+    if np.ptp(env) <= max(np.finfo(float).eps, 1e-12 * peak):
+        return float("nan"), float("nan")
+
+    high_mask = env > 0.7 * peak
+    high_edges = np.diff(np.concatenate([[False], high_mask, [False]]).astype(int))
+    high_starts = np.flatnonzero(high_edges == 1)
+    high_ends = np.flatnonzero(high_edges == -1)
+    has_body = any(end - start >= 2 for start, end in zip(high_starts, high_ends))
+    if not has_body:
+        return float("nan"), float("nan")
+
+    c1 = np.where(high_mask)[0]
+    if c1.size < 2:
+        return float("nan"), float("nan")
+    th_high = float(np.mean(env[c1]))
+    c10 = np.where(env >= th_high * (1 - 1e-9))[0]
+    if c10.size == 0:
+        c10 = c1
+    toa_idx = int(c10[0])
+
+    c2 = np.where(env > 0.2 * peak)[0]
+    if c2.size == 0:
+        return float("nan"), float("nan")
+    th_low = float(np.mean(env[c2]))
+
+    tail = env[toa_idx:]
+    below = np.where(tail < th_low * (1 - 1e-9))[0]
+    below = below[below > 0]
+    eoa_idx = int(toa_idx + below[0]) if below.size else int(len(env) - 1)
+    if eoa_idx <= toa_idx:
+        return float("nan"), float("nan")
+
+    toa_us = toa_idx / fs_mhz
+    pw_us = (eoa_idx - toa_idx) / fs_mhz
+    return float(toa_us), float(pw_us)
+
+
 def _active_segments(mask: np.ndarray) -> list[tuple[int, int]]:
     edges = np.diff(np.concatenate([[False], mask, [False]]).astype(int))
     starts = np.flatnonzero(edges == 1)

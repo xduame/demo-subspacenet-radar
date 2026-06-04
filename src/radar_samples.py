@@ -141,6 +141,23 @@ class RadarSamples(Samples):
         amplitude = 10 ** (self.params.snr / 10)
         rng = np.random.default_rng()
         models = list(self.library.keys())
+        self.last_radar_truth = []
+
+        def record_truth(source_index, model_name, mode_name, toa, pri, pw, rf, bw):
+            self.last_radar_truth.append(
+                dict(
+                    source_index=source_index,
+                    model=model_name,
+                    mode=mode_name,
+                    toa_us=toa.copy(),
+                    pri_us=pri.copy(),
+                    pw_us=pw.copy(),
+                    rf_mhz=rf.copy(),
+                    bw_mhz=bw.copy(),
+                    fs_mhz=self.fs_mhz,
+                    rf_center_mhz=self.rf_center_mhz,
+                )
+            )
 
         # 随机选 M 个 (型号, 模式) 组合
         chosen = []
@@ -156,6 +173,7 @@ class RadarSamples(Samples):
             for m, (mdl, md) in enumerate(chosen):
                 toa, pri, pw, rf, bw = _gen_pdw(self.library[mdl][md],
                                                 approx_pulses, rng)
+                record_truth(m, mdl, md, toa, pri, pw, rf, bw)
                 sig = _synthesize_iq(toa, pw, rf, bw, T,
                                      self.fs_mhz, self.rf_center_mhz)
                 S[m] = sig
@@ -166,6 +184,7 @@ class RadarSamples(Samples):
             sig = _synthesize_iq(toa, pw, rf, bw, T,
                                  self.fs_mhz, self.rf_center_mhz)
             for m in range(M):
+                record_truth(m, mdl, md, toa, pri, pw, rf, bw)
                 S[m] = sig
 
         S = amplitude * (np.sqrt(2) / 2) * np.sqrt(signal_variance) * S + signal_mean

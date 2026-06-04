@@ -51,6 +51,34 @@ def steering_vector(
     return np.exp(-2j * np.pi * element_spacing * sensor_index * np.sin(theta))
 
 
+def beamform(X, doa_deg, N=16):
+    """
+    用给定 DoA 对阵列信号做相干合成,分离出该方向的源信号。
+
+    Args:
+        X: 阵列信号 [N, T] 复数 (numpy 或 torch)
+        doa_deg: 单个角度(度)
+        N: 阵元数
+
+    Returns:
+        beamformed: [T] 复数,该方向波束形成后的单通道信号
+    """
+    if hasattr(X, "detach"):
+        X = X.detach().cpu().numpy()
+    X = np.asarray(X)
+    if X.ndim != 2:
+        raise ValueError(f"Expected X with shape (N, T), got {X.shape}.")
+    if X.shape[0] != N:
+        raise ValueError(f"Expected {N} sensors, got {X.shape[0]}.")
+    if not np.iscomplexobj(X):
+        raise ValueError("Expected complex array samples in X.")
+
+    n = np.arange(N)
+    theta = np.deg2rad(float(doa_deg))
+    steering = np.exp(-1j * np.pi * n * np.sin(theta))
+    return np.conj(steering) @ X / N
+
+
 def beamform_source(
     X: np.ndarray, doa_deg: float, element_spacing: float = 0.5
 ) -> np.ndarray:
@@ -61,10 +89,13 @@ def beamform_source(
     if not np.iscomplexobj(X):
         raise ValueError("Expected complex array samples in X.")
 
+    if element_spacing == 0.5:
+        return beamform(X, doa_deg=doa_deg, N=X.shape[0])
+
     steering = steering_vector(
-        doa_deg=doa_deg, n_sensors=X.shape[0], element_spacing=element_spacing
+        doa_deg, n_sensors=X.shape[0], element_spacing=element_spacing
     )
-    return (np.conj(steering) @ X) / X.shape[0]
+    return np.conj(steering) @ X / X.shape[0]
 
 
 def beamform_sources(

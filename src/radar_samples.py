@@ -142,6 +142,7 @@ class RadarSamples(Samples):
         rng = np.random.default_rng()
         models = list(self.library.keys())
         self.last_radar_truth = []
+        self._last_true_params = []
 
         def record_truth(source_index, model_name, mode_name, toa, pri, pw, rf, bw):
             self.last_radar_truth.append(
@@ -156,6 +157,14 @@ class RadarSamples(Samples):
                     bw_mhz=bw.copy(),
                     fs_mhz=self.fs_mhz,
                     rf_center_mhz=self.rf_center_mhz,
+                )
+            )
+            self._last_true_params.append(
+                dict(
+                    pw_us=float(np.mean(pw)),
+                    rf_mhz=float(np.mean(rf)),
+                    bw_mhz=float(np.mean(bw)),
+                    toa_us=float(toa[0]),
                 )
             )
 

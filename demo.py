@@ -5,6 +5,7 @@ Modes:
   batch       Evaluate the saved 500-sample radar test set.
   interactive Estimate user-provided DoA angles.
   file        Estimate DoA from a saved signal file.
+  export      Export a generated radar signal sample.
 """
 
 import argparse
@@ -38,6 +39,8 @@ TEST_DATASET_PATH = (
     / "test"
     / "SubspaceNet_DataSet_NarrowBand_non-coherent_500_M=2_N=16_T=200_SNR=0_eta=0_sv_noise_var0_bias=0_.h5"
 )
+DEFAULT_EXPORT_PATH = Path("data") / "demo_exports" / "radar_signal.npz"
+DEFAULT_EXPORT_DOAS = [-30.0, 25.0]
 PRESET_DOAS = [
     [-40.0, 20.0],
     [-20.0, 35.0],
@@ -232,6 +235,30 @@ def run_file(model: SubspaceNet, device: torch.device, input_path: Path | None) 
         print_case("File scene", pred_deg, truth_deg, elapsed_ms)
 
 
+def run_export(output_path: Path | None, angle_args: str | None = None) -> None:
+    output_path = output_path or DEFAULT_EXPORT_PATH
+    if output_path.suffix.lower() != ".npz":
+        raise ValueError("--output-path must end with .npz for export mode.")
+
+    angles = parse_angles(angle_args or " ".join(str(value) for value in DEFAULT_EXPORT_DOAS))
+    X, truth_deg = make_radar_signal(angles)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        output_path,
+        X=X.numpy(),
+        doa_deg=truth_deg,
+        format_version=np.array("radar_doa_npz_v1"),
+        N=np.array(X.shape[0]),
+        T=np.array(X.shape[1]),
+        M=np.array(NUM_SOURCES),
+    )
+
+    print("Exported radar signal")
+    print(f"Path        : {output_path}")
+    print(f"X           : shape={tuple(X.shape)}, dtype={X.numpy().dtype}")
+    print(f"Ground truth: {format_values(truth_deg)} deg")
+
+
 def parse_angles(raw_values: str | list[str]) -> list[float]:
     if isinstance(raw_values, str):
         raw_values = raw_values.replace(",", " ").split()
@@ -272,7 +299,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Radar SubspaceNet DoA demo.")
     parser.add_argument(
         "--mode",
-        choices=("preset", "batch", "interactive", "file", "all"),
+        choices=("preset", "batch", "interactive", "file", "export", "all"),
         default="preset",
         help="Demo mode to run.",
     )
@@ -290,6 +317,11 @@ def parse_args() -> argparse.Namespace:
         "--input-path",
         type=Path,
         help="Signal file for file mode. Supports .npz with X/doa_deg or .npy with X.",
+    )
+    parser.add_argument(
+        "--output-path",
+        type=Path,
+        help="Output .npz path for export mode.",
     )
     parser.add_argument(
         "--device",
@@ -311,6 +343,10 @@ def choose_device(device_name: str) -> torch.device:
 def main() -> None:
     args = parse_args()
     device = choose_device(args.device)
+    if args.mode == "export":
+        run_export(output_path=args.output_path, angle_args=args.angles)
+        return
+
     model = load_model(device)
     print(f"Model : {MODEL_PATH}")
     print(f"Device: {device}")

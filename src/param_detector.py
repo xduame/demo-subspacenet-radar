@@ -202,8 +202,22 @@ def detect_pulse_segments(
     noise_percentile: float = 20.0,
     min_width_samples: int = 8,
     max_gap_samples: int = 1,
+    flat_envelope_ratio: float = 1.3,
 ) -> list[tuple[int, int]]:
-    """Detect pulse support intervals from a beamformed complex signal."""
+    """Detect pulse support intervals from a beamformed complex signal.
+
+    Threshold-based segmentation assumes the observation window contains both
+    "quiet" floor samples and "loud" pulse samples; the floor anchors the
+    threshold and the rising/falling edges of the envelope locate pulse
+    boundaries. When the pulse fills the entire window (PW ~= T/fs) there is
+    no quiet floor: the envelope is nearly flat at the pulse amplitude and
+    noise / aliasing ripple drives the threshold up into the bulk, producing
+    dozens of spurious noise-width segments.
+
+    The ``flat_envelope_ratio`` heuristic detects this degenerate case: if
+    ``peak / floor`` is below the ratio, the whole window is treated as one
+    pulse ``(0, len(envelope))``. Tune the ratio if floor estimation changes.
+    """
     signal = np.asarray(signal)
     envelope = np.abs(signal)
     if envelope.size == 0 or np.max(envelope) <= 0:
@@ -211,6 +225,11 @@ def detect_pulse_segments(
 
     floor = np.percentile(envelope, noise_percentile)
     peak = np.max(envelope)
+
+    if floor > 0 and peak / floor < flat_envelope_ratio:
+        # Whole window is inside a single pulse -- no clean edges to find.
+        return [(0, int(envelope.size))]
+
     threshold = floor + threshold_rel * (peak - floor)
     segments = _active_segments(envelope >= threshold)
     segments = _merge_short_gaps(segments, max_gap_samples=max_gap_samples)

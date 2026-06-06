@@ -143,6 +143,11 @@ class RadarSamples(Samples):
         models = list(self.library.keys())
         self.last_radar_truth = []
         self._last_true_params = []
+        # Observation window length in microseconds. Pulses with toa >= duration_us
+        # are not emitted at all; pulses that straddle the boundary get truncated
+        # by _synthesize_iq. The truth recorded below must reflect what is
+        # actually visible in the array snapshot, not the raw PDW table.
+        duration_us = float(T) / float(self.fs_mhz)
 
         def record_truth(source_index, model_name, mode_name, toa, pri, pw, rf, bw):
             self.last_radar_truth.append(
@@ -157,14 +162,61 @@ class RadarSamples(Samples):
                     bw_mhz=bw.copy(),
                     fs_mhz=self.fs_mhz,
                     rf_center_mhz=self.rf_center_mhz,
+                    duration_us=duration_us,
                 )
+            )
+            # In-window truth: keep only pulses whose TOA falls inside the
+            # observation window. Each in-window pulse's effective PW is clipped
+            # to the remaining window (matches what _synthesize_iq emits). RF
+            # truth is the chirp center frequency (rf_lo + BW/2), aligned with
+            # FFT spectral-centroid estimators so the comparison is apples-to-
+            # apples regardless of single-tone vs LFM modulation.
+            in_window = toa < duration_us
+            num_in_window = int(np.sum(in_window))
+            if num_in_window == 0:
+                self._last_true_params.append(
+                    dict(
+                        pw_us=float("nan"),
+                        rf_mhz=float("nan"),
+                        bw_mhz=float("nan"),
+                        toa_us=float("nan"),
+                        num_pulses_in_window=0,
+                        aliased=False,
+                    )
+                )
+                return
+            toa_w = toa[in_window]
+            pw_w = np.minimum(pw[in_window], duration_us - toa_w)
+            rf_w = rf[in_window]
+            bw_w = bw[in_window]
+            # _synthesize_iq builds the complex baseband as exp(j*2pi*(f0*t + 0.5*k*t^2))
+            # with f0 = rf - rf_center_mhz. Sampling at fs_mhz wraps any baseband
+            # frequency outside (-fs/2, fs/2] back into that interval. The detector
+            # observes this wrapped (aliased) signal, so the truth recorded here
+            # must apply the same wrap or comparisons will be meaningless.
+            rf_bb_lo = rf_w - self.rf_center_mhz                      # chirp lower edge, baseband
+            rf_bb_center = rf_bb_lo + 0.5 * bw_w                      # chirp center, baseband
+            rf_bb_center_wrapped = (
+                (rf_bb_center + self.fs_mhz / 2.0) % self.fs_mhz
+                - self.fs_mhz / 2.0
+            )
+            rf_center_truth = self.rf_center_mhz + rf_bb_center_wrapped
+            # A pulse whose chirp band [rf_bb_lo, rf_bb_lo+bw] does not fit inside
+            # (-fs/2, fs/2] folds around the Nyquist edge, splitting its spectrum
+            # into two non-contiguous bands. The FFT centroid then has no clean
+            # physical meaning; verify scripts should filter these out.
+            aliased_per_pulse = (
+                (rf_bb_lo < -self.fs_mhz / 2.0)
+                | (rf_bb_lo + bw_w > self.fs_mhz / 2.0)
             )
             self._last_true_params.append(
                 dict(
-                    pw_us=float(np.mean(pw)),
-                    rf_mhz=float(np.mean(rf)),
-                    bw_mhz=float(np.mean(bw)),
-                    toa_us=float(toa[0]),
+                    pw_us=float(np.mean(pw_w)),
+                    rf_mhz=float(np.mean(rf_center_truth)),
+                    bw_mhz=float(np.mean(bw_w)),
+                    toa_us=float(toa_w[0]),
+                    num_pulses_in_window=num_in_window,
+                    aliased=bool(np.any(aliased_per_pulse)),
                 )
             )
 

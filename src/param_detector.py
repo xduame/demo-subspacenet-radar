@@ -200,7 +200,7 @@ def detect_pulse_segments(
     signal: np.ndarray,
     threshold_rel: float = 0.35,
     noise_percentile: float = 20.0,
-    min_width_samples: int = 2,
+    min_width_samples: int = 8,
     max_gap_samples: int = 1,
 ) -> list[tuple[int, int]]:
     """Detect pulse support intervals from a beamformed complex signal."""
@@ -222,12 +222,100 @@ def detect_pulse_segments(
 
 
 def instantaneous_frequency_mhz(signal: np.ndarray, fs_mhz: float) -> np.ndarray:
-    """Estimate sample-to-sample instantaneous frequency in MHz."""
+    """Estimate sample-to-sample instantaneous frequency in MHz.
+
+    NOTE: No longer used by ``detect_parameters`` as of the FFT-based refactor.
+    Kept available for future LFM chirp-rate analysis (a linear fit of the
+    instantaneous frequency over a pulse segment gives the chirp slope k, and
+    BW = k * PW is a tighter BW estimate than the FFT 5/95% method). Near
+    SNR=0 dB the per-sample phase derivative is noise-dominated and unwrap()
+    can be tripped by spurious 2*pi jumps, so this is unreliable for raw RF
+    or BW estimation -- prefer ``detect_rf_centroid`` / ``detect_bw_fft``.
+    """
     signal = np.asarray(signal)
     if signal.size < 2:
         return np.array([], dtype=float)
     phase = np.unwrap(np.angle(signal))
     return np.diff(phase) * fs_mhz / (2 * np.pi)
+
+
+def _pulse_power_spectrum(
+    signal: np.ndarray, start: int, end: int, fs_mhz: float
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Compute zero-padded power spectrum of one pulse segment.
+
+    Returns (freqs_mhz, spec) on success, ``None`` if the segment is too short
+    or non-complex. Padding to ``max(64, 8*seg.size)`` lifts the frequency
+    resolution from fs/seg.size (~25 MHz for 8 samples) to ~fs/64 (~3 MHz),
+    which the centroid / cumulative-energy estimators rely on for sub-bin
+    accuracy.
+    """
+    seg = np.asarray(signal[start:end])
+    if seg.size < 4 or not np.iscomplexobj(seg):
+        return None
+    nfft = max(64, 8 * seg.size)
+    spec = np.abs(np.fft.fftshift(np.fft.fft(seg, n=nfft))) ** 2
+    if not np.any(spec > 0):
+        return None
+    freqs = np.fft.fftshift(np.fft.fftfreq(nfft, d=1.0 / fs_mhz))
+    return freqs, spec
+
+
+def detect_rf_centroid(
+    signal: np.ndarray,
+    start: int,
+    end: int,
+    fs_mhz: float,
+    rf_center_mhz: float,
+) -> float:
+    """Estimate carrier frequency via power-weighted spectral centroid.
+
+    Robust on both single-tone and LFM signals:
+
+    * Single-tone: power is concentrated at one bin, centroid == tone freq.
+    * LFM: power is spread across the chirp band ``[f0, f0+BW]``; ``argmax``
+      lands on a random bin within that band (BW/2 single-sample error), but
+      the centroid converges to ``f0 + BW/2`` (the chirp center) with noise
+      averaging across the integral.
+
+    Returns the absolute carrier in MHz (``rf_center_mhz + f_center_bb``) or
+    NaN if the segment is too short to spectrally analyze.
+    """
+    result = _pulse_power_spectrum(signal, start, end, fs_mhz)
+    if result is None:
+        return float("nan")
+    freqs, spec = result
+    f_center = float(np.sum(freqs * spec) / np.sum(spec))
+    return float(rf_center_mhz + f_center)
+
+
+def detect_bw_fft(
+    signal: np.ndarray,
+    start: int,
+    end: int,
+    fs_mhz: float,
+    energy_ratio: float = 0.9,
+) -> float:
+    """Estimate occupied bandwidth via cumulative power (default 5%~95%).
+
+    For a single-tone pulse this returns ~0 (no spurious BW from instantaneous-
+    frequency jitter). For LFM it returns a value close to the true chirp BW,
+    slightly under-reading because the 5/95% bounds clip the sinc tails of the
+    finite pulse. Padded FFT (see ``_pulse_power_spectrum``) keeps single-tone
+    BW well below 1 MHz even on short pulses.
+    """
+    if not 0 < energy_ratio < 1:
+        raise ValueError("energy_ratio must be in (0, 1).")
+    result = _pulse_power_spectrum(signal, start, end, fs_mhz)
+    if result is None:
+        return float("nan")
+    freqs, spec = result
+    cumsum = np.cumsum(spec) / float(np.sum(spec))
+    lo_q = (1.0 - energy_ratio) / 2.0
+    hi_q = 1.0 - lo_q
+    lo_idx = min(int(np.searchsorted(cumsum, lo_q)), freqs.size - 1)
+    hi_idx = min(int(np.searchsorted(cumsum, hi_q)), freqs.size - 1)
+    return float(abs(freqs[hi_idx] - freqs[lo_idx]))
 
 
 def _finite_median(values: list[float]) -> float:
@@ -239,21 +327,21 @@ def _finite_median(values: list[float]) -> float:
 
 
 def _estimate_pulse(
+    signal: np.ndarray,
     start: int,
     end: int,
-    inst_freq_mhz: np.ndarray,
     fs_mhz: float,
     rf_center_mhz: float,
 ) -> PulseEstimate:
-    freq_slice = inst_freq_mhz[start : max(start, end - 1)]
-    if freq_slice.size:
-        low, high = np.percentile(freq_slice, [5, 95])
-        rf_mhz = rf_center_mhz + float(np.median(freq_slice))
-        bw_mhz = float(abs(high - low))
-    else:
-        rf_mhz = float("nan")
-        bw_mhz = float("nan")
+    """Estimate per-pulse parameters via FFT spectral centroid / 5-95% energy.
 
+    See ``detect_rf_centroid`` and ``detect_bw_fft`` for the method rationale.
+    Each pulse is analyzed independently so the aggregation in
+    ``estimate_source_params`` can take a robust median across pulses (which
+    suppresses outliers from sidelobe leakage of other sources).
+    """
+    rf_mhz = detect_rf_centroid(signal, start, end, fs_mhz, rf_center_mhz)
+    bw_mhz = detect_bw_fft(signal, start, end, fs_mhz)
     return PulseEstimate(
         toa_us=float(start / fs_mhz),
         pw_us=float((end - start) / fs_mhz),
@@ -270,7 +358,7 @@ def estimate_source_params(
     fs_mhz: float = 200.0,
     rf_center_mhz: float = 9000.0,
     threshold_rel: float = 0.35,
-    min_width_samples: int = 2,
+    min_width_samples: int = 8,
 ) -> SourceParamEstimate:
     """Estimate pulse parameters from one beamformed source channel."""
     segments = detect_pulse_segments(
@@ -278,9 +366,8 @@ def estimate_source_params(
         threshold_rel=threshold_rel,
         min_width_samples=min_width_samples,
     )
-    inst_freq = instantaneous_frequency_mhz(signal, fs_mhz=fs_mhz)
     pulses = [
-        _estimate_pulse(start, end, inst_freq, fs_mhz, rf_center_mhz)
+        _estimate_pulse(signal, start, end, fs_mhz, rf_center_mhz)
         for start, end in segments
     ]
 
@@ -313,7 +400,7 @@ def detect_parameters(
     rf_center_mhz: float = 9000.0,
     element_spacing: float = 0.5,
     threshold_rel: float = 0.35,
-    min_width_samples: int = 2,
+    min_width_samples: int = 8,
 ) -> list[SourceParamEstimate]:
     """Beamform each DoA and estimate pulse parameters per source."""
     estimates = []

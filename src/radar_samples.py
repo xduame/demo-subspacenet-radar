@@ -186,15 +186,31 @@ class RadarSamples(Samples):
                 )
                 return
             toa_w = toa[in_window]
-            pw_w = np.minimum(pw[in_window], duration_us - toa_w)
+            pw_orig = pw[in_window]
+            pw_w = np.minimum(pw_orig, duration_us - toa_w)
             rf_w = rf[in_window]
-            bw_w = bw[in_window]
+            bw_orig = bw[in_window]
+            # When _synthesize_iq truncates a chirp pulse at the window edge it
+            # emits only the portion of the sweep that fit, so the actual emitted
+            # bandwidth is bw_orig * (pw_w / pw_orig). The chirp rate
+            # k = bw_orig / pw_orig stays the same; truncating PW just stops the
+            # sweep early. Records bw_emitted as the truth so the FFT 5/95%
+            # estimator (which measures what's actually in the signal) can be
+            # compared directly.
+            with np.errstate(divide="ignore", invalid="ignore"):
+                bw_w = np.where(
+                    pw_orig > 0,
+                    bw_orig * (pw_w / pw_orig),
+                    bw_orig,
+                )
             # _synthesize_iq builds the complex baseband as exp(j*2pi*(f0*t + 0.5*k*t^2))
             # with f0 = rf - rf_center_mhz. Sampling at fs_mhz wraps any baseband
             # frequency outside (-fs/2, fs/2] back into that interval. The detector
             # observes this wrapped (aliased) signal, so the truth recorded here
             # must apply the same wrap or comparisons will be meaningless.
             rf_bb_lo = rf_w - self.rf_center_mhz                      # chirp lower edge, baseband
+            # Use the emitted-BW center, not the original-BW center: the chirp
+            # only swept halfway through its band before truncation.
             rf_bb_center = rf_bb_lo + 0.5 * bw_w                      # chirp center, baseband
             rf_bb_center_wrapped = (
                 (rf_bb_center + self.fs_mhz / 2.0) % self.fs_mhz
@@ -205,6 +221,9 @@ class RadarSamples(Samples):
             # (-fs/2, fs/2] folds around the Nyquist edge, splitting its spectrum
             # into two non-contiguous bands. The FFT centroid then has no clean
             # physical meaning; verify scripts should filter these out.
+            # Aliasing is determined by the EMITTED band (rf_bb_lo to rf_bb_lo+bw_w).
+            # Truncating PW shrinks the emitted band, so a chirp that would have
+            # aliased at full PW may not alias at truncated PW.
             aliased_per_pulse = (
                 (rf_bb_lo < -self.fs_mhz / 2.0)
                 | (rf_bb_lo + bw_w > self.fs_mhz / 2.0)

@@ -34,6 +34,7 @@ from src.system_model import SystemModelParams
 
 
 NUM_TRIALS = 100
+DIAGNOSTIC_TRIALS_PER_SNR = 3
 SNR_LIST = (0, 20)
 M_SOURCES = 2
 T_SNAPSHOTS = 200
@@ -48,6 +49,8 @@ DOA_MIN_GAP_DEG = 15.0  # so beamforming can separate the two sources
 @dataclass
 class SourceRecord:
     snr_db: int
+    trial_idx: int
+    source_idx: int
     doa_deg: float
     truth: dict
     estimate: dict
@@ -86,7 +89,7 @@ def sample_truth_doas(rng: np.random.Generator) -> list[float]:
             return candidates.tolist()
 
 
-def run_one_trial(snr_db: int, rng_seed: int) -> list[SourceRecord]:
+def run_one_trial(snr_db: int, trial_idx: int, rng_seed: int) -> list[SourceRecord]:
     """One Monte-Carlo trial: returns one record per (truth) source."""
     np.random.seed(rng_seed)            # for the simulator's internal np.random
     rng = np.random.default_rng(rng_seed)
@@ -107,10 +110,12 @@ def run_one_trial(snr_db: int, rng_seed: int) -> list[SourceRecord]:
     )
 
     records: list[SourceRecord] = []
-    for doa, truth, est in zip(truth_doas, truths, estimates):
+    for source_idx, (doa, truth, est) in enumerate(zip(truth_doas, truths, estimates), start=1):
         records.append(
             SourceRecord(
                 snr_db=snr_db,
+                trial_idx=trial_idx,
+                source_idx=source_idx,
                 doa_deg=float(doa),
                 truth=truth,
                 estimate=est.to_dict(),
@@ -120,6 +125,44 @@ def run_one_trial(snr_db: int, rng_seed: int) -> list[SourceRecord]:
             )
         )
     return records
+
+
+def _fmt(value: float, precision: int) -> str:
+    if value is None or not np.isfinite(value):
+        return "nan"
+    return f"{float(value):.{precision}f}"
+
+
+def print_diagnostics(records: list[SourceRecord]) -> None:
+    """Print per-source truth/detection internals for debugging."""
+    current_header: tuple[int, int] | None = None
+    for record in records:
+        header = (record.snr_db, record.trial_idx)
+        if header != current_header:
+            print()
+            print(f"[diagnostic] SNR={record.snr_db:+d} dB trial={record.trial_idx}")
+            current_header = header
+
+        true = record.truth
+        est = record.estimate
+        print(f"源{record.source_idx} DoA={record.doa_deg:.2f}")
+        print(
+            f"  真值: PW={_fmt(true.get('pw_us'), 4)}us  "
+            f"RF={_fmt(true.get('rf_mhz'), 1)}  "
+            f"BW={_fmt(true.get('bw_mhz'), 2)}  "
+            f"TOA={_fmt(true.get('toa_us'), 4)}"
+        )
+        print(
+            f"        窗口内脉冲数={int(true.get('num_pulses_in_window', 0))}  "
+            f"混叠={bool(true.get('aliased', False))}"
+        )
+        print(
+            f"  检测: PW={_fmt(est.get('pw_us'), 4)}us  "
+            f"RF={_fmt(est.get('rf_mhz'), 1)}  "
+            f"BW={_fmt(est.get('bw_mhz'), 2)}  "
+            f"TOA={_fmt(est.get('toa_us'), 4)}"
+        )
+        print(f"        检测到脉冲数={int(est.get('pulse_count', 0))}")
 
 
 def _percentile(values: Sequence[float], q: float) -> float:
@@ -195,6 +238,7 @@ def main() -> None:
     print("Radar Parameter Detector Verification")
     print("=" * 70)
     print(f"Trials per SNR : {NUM_TRIALS}")
+    print(f"Diagnostic trials per SNR : {DIAGNOSTIC_TRIALS_PER_SNR}")
     print(f"SNRs           : {SNR_LIST} dB")
     print(f"M={M_SOURCES}, N={N_SENSORS}, T={T_SNAPSHOTS}, fs={FS_MHZ} MHz, "
           f"rf_center={RF_CENTER_MHZ} MHz")
@@ -202,13 +246,19 @@ def main() -> None:
     print()
 
     all_records: list[SourceRecord] = []
+    diagnostic_records: list[SourceRecord] = []
     for snr_db in SNR_LIST:
         for trial_idx in range(NUM_TRIALS):
             # Distinct seed per (snr, trial) so the two SNRs see different
             # realizations -- comparing identical signals at different SNRs
             # would only test the noise path, not the algorithm.
             seed = 10_000 * (snr_db + 100) + trial_idx
-            all_records.extend(run_one_trial(snr_db, seed))
+            records = run_one_trial(snr_db, trial_idx, seed)
+            all_records.extend(records)
+            if trial_idx < DIAGNOSTIC_TRIALS_PER_SNR:
+                diagnostic_records.extend(records)
+
+    print_diagnostics(diagnostic_records)
 
     for snr_db in SNR_LIST:
         snr_records = [r for r in all_records if r.snr_db == snr_db]
